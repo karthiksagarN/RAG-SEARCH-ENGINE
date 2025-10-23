@@ -1,4 +1,4 @@
-## RAG Search Engine (Multi-Chat)
+## Knowledge-base Search Engine (RAG Multi-Chat)
 
 ## 🔗 Quick Links
 - **DEMO VIDEO FILE:** [Click Here](https://drive.google.com/file/d/1_Pqf8hIO8-o3JCM4TpzvDWDT8XyzaH46/view?usp=sharing)  
