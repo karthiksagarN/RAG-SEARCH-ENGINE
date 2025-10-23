@@ -4,12 +4,86 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>RAG Chat (OpenAI)</title>
-    <!-- Tailwind CDN (for quick dev) -->
+    <title>RAG Search Engine 💡</title>
+
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Inter font for clean modern typography -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        font-family: 'Inter', sans-serif;
+      }
+      body {
+        background: linear-gradient(135deg, #f9fafb, #eef2ff);
+      }
+
+      /* Initial loading spinner */
+      #loader {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, #f9fafb, #eef2ff);
+        z-index: 50;
+        transition: opacity 0.4s ease;
+      }
+
+      .spinner {
+        border: 4px solid #e5e7eb;
+        border-top-color: #6366f1;
+        border-radius: 50%;
+        width: 3rem;
+        height: 3rem;
+        animation: spin 0.9s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      #root {
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+    </style>
   </head>
-  <body class="h-screen overflow-hidden bg-gray-100">
+
+  <body class="antialiased">
+    <!-- Loader shown until React mounts -->
+    <div id="loader">
+      <div class="flex flex-col items-center gap-3">
+        <div class="spinner"></div>
+        <p class="text-gray-700 text-sm font-medium">Launching RAG Chat...</p>
+      </div>
+    </div>
+
     <div id="root"></div>
+
     <script type="module" src="/src/main.tsx"></script>
+
+    <script>
+      // Fade out loader once React is ready
+      window.addEventListener("load", () => {
+        const loader = document.getElementById("loader");
+        const root = document.getElementById("root");
+        if (loader && root) {
+          loader.style.opacity = "0";
+          setTimeout(() => loader.remove(), 400);
+          root.style.opacity = "1";
+        }
+      });
+    </script>
   </body>
 </html>

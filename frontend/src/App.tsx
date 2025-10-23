@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from "react";
 import {
   apiCreateChat,
   apiListChats,
@@ -7,28 +7,26 @@ import {
   apiQuery,
   Chat,
   QueryResponse,
-} from './lib/api';
+} from "./lib/api";
 
 interface Message {
-  role: 'user' | 'assistant';
+  role: "user" | "assistant";
   content: string;
 }
 
-const STORAGE_KEY = 'rag_chat_messages';
+const STORAGE_KEY = "rag_chat_messages";
 
 const App: React.FC = () => {
   const [chats, setChats] = useState<Chat[]>([]);
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [showNewChat, setShowNewChat] = useState(false);
-  const [newChatName, setNewChatName] = useState('');
+  const [newChatName, setNewChatName] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // ------------------------------------------------------------------ //
-  // Load chats + persisted messages
-  // ------------------------------------------------------------------ //
+  // Load chats
   useEffect(() => {
     const load = async () => {
       const { data } = await apiListChats();
@@ -41,16 +39,10 @@ const App: React.FC = () => {
     if (stored) setMessages(JSON.parse(stored));
   }, []);
 
-  // ------------------------------------------------------------------ //
-  // Auto-scroll
-  // ------------------------------------------------------------------ //
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, selectedChat]);
 
-  // ------------------------------------------------------------------ //
-  // Helpers
-  // ------------------------------------------------------------------ //
   const persistMessages = (newMsg: Record<string, Message[]>) => {
     setMessages(newMsg);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(newMsg));
@@ -58,82 +50,63 @@ const App: React.FC = () => {
 
   const currentChatMessages = selectedChat ? messages[selectedChat] ?? [] : [];
 
-  // ------------------------------------------------------------------ //
-  // CRUD Chats
-  // ------------------------------------------------------------------ //
   const createChat = async () => {
     if (!newChatName.trim()) return;
     const { data } = await apiCreateChat(newChatName);
     setChats((c) => [...c, data]);
     setSelectedChat(data.chat_id);
     setShowNewChat(false);
-    setNewChatName('');
+    setNewChatName("");
   };
 
   const deleteChat = async (id: string) => {
     await apiDeleteChat(id);
     setChats((c) => c.filter((x) => x.chat_id !== id));
-    if (selectedChat === id) {
-      const remaining = chats.filter((x) => x.chat_id !== id);
-      setSelectedChat(remaining[0]?.chat_id ?? null);
-    }
     const newMsg = { ...messages };
     delete newMsg[id];
     persistMessages(newMsg);
+    if (selectedChat === id) setSelectedChat(null);
   };
 
-  // ------------------------------------------------------------------ //
-  // Upload
-  // ------------------------------------------------------------------ //
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!selectedChat || !e.target.files) return;
     const files = Array.from(e.target.files);
     await apiUploadFiles(selectedChat, files);
-    alert('Files uploaded – you can now ask questions about them.');
+    alert("✅ Files uploaded. You can now query them!");
   };
 
-  // ------------------------------------------------------------------ //
-  // Query
-  // ------------------------------------------------------------------ //
   const sendMessage = async () => {
     if (!input.trim() || !selectedChat || loading) return;
     setLoading(true);
-
-    // user message
-    const userMsg: Message = { role: 'user', content: input };
+    const userMsg: Message = { role: "user", content: input };
     const updated = {
       ...messages,
       [selectedChat]: [...currentChatMessages, userMsg],
     };
     persistMessages(updated);
-    setInput('');
+    setInput("");
 
     try {
       const { data }: { data: QueryResponse } = await apiQuery(selectedChat, input);
-      const assistantMsg: Message = { role: 'assistant', content: data.answer };
-      const final = {
+      const assistantMsg: Message = { role: "assistant", content: data.answer };
+      persistMessages({
         ...updated,
         [selectedChat]: [...updated[selectedChat], assistantMsg],
-      };
-      persistMessages(final);
+      });
     } catch (err: any) {
       const errMsg: Message = {
-        role: 'assistant',
-        content: `Error: ${err.response?.data?.detail ?? err.message}`,
+        role: "assistant",
+        content: `⚠️ Error: ${err.response?.data?.detail ?? err.message}`,
       };
-      const final = {
+      persistMessages({
         ...updated,
         [selectedChat]: [...updated[selectedChat], errMsg],
-      };
-      persistMessages(final);
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  // ------------------------------------------------------------------ //
-  // Clear history for current chat
-  // ------------------------------------------------------------------ //
   const clearHistory = () => {
     if (!selectedChat) return;
     const newMsg = { ...messages };
@@ -141,59 +114,59 @@ const App: React.FC = () => {
     persistMessages(newMsg);
   };
 
-  // ------------------------------------------------------------------ //
-  // Render
-  // ------------------------------------------------------------------ //
   return (
-    <div className="flex h-screen">
-      {/* ---------- Sidebar ---------- */}
-      <aside className="w-72 bg-gray-900 text-gray-100 flex flex-col">
-        <div className="p-4">
+    <div className="flex h-screen bg-gray-100 text-gray-800">
+      {/* Sidebar */}
+      <aside className="w-72 bg-gradient-to-b from-gray-900 to-gray-800 text-white flex flex-col shadow-lg">
+        <div className="p-4 border-b border-gray-700">
+          <h1 className="text-lg font-semibold mb-2">🧠 Knowledge-Base RAG Search Engine</h1>
           <button
             onClick={() => setShowNewChat(true)}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 rounded"
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg transition"
           >
             + New Chat
           </button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-2">
+        <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-1">
           {chats.map((c) => (
             <div
               key={c.chat_id}
-              className={`group flex items-center justify-between p-2 my-1 rounded cursor-pointer transition ${
-                selectedChat === c.chat_id ? 'bg-gray-700' : 'hover:bg-gray-800'
+              className={`flex justify-between items-center p-2 rounded-lg cursor-pointer transition-all ${
+                selectedChat === c.chat_id
+                  ? "bg-indigo-600 text-white"
+                  : "hover:bg-gray-700"
               }`}
               onClick={() => setSelectedChat(c.chat_id)}
             >
-              <span className="truncate flex-1">{c.name}</span>
+              <span className="truncate">{c.name}</span>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   deleteChat(c.chat_id);
                 }}
-                className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 ml-2"
-                title="Delete"
+                className="text-red-400 hover:text-red-300 text-sm"
+                title="Delete chat"
               >
-                X
+                ✖
               </button>
             </div>
           ))}
         </nav>
       </aside>
 
-      {/* ---------- Main Area ---------- */}
+      {/* Chat Area */}
       <main className="flex-1 flex flex-col">
         {/* Header */}
-        <header className="bg-white border-b p-4 flex items-center justify-between">
-          <h1 className="text-xl font-semibold">
+        <header className="bg-white border-b shadow-sm p-4 flex items-center justify-between sticky top-0 z-10">
+          <h2 className="text-xl font-bold">
             {selectedChat
-              ? chats.find((c) => c.chat_id === selectedChat)?.name ?? 'Chat'
-              : 'Select a chat'}
-          </h1>
+              ? chats.find((c) => c.chat_id === selectedChat)?.name
+              : "Select a chat to begin"}
+          </h2>
           {selectedChat && (
             <div className="flex gap-2">
-              <label className="cursor-pointer bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded">
+              <label className="cursor-pointer bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg">
                 Upload
                 <input
                   type="file"
@@ -205,7 +178,7 @@ const App: React.FC = () => {
               </label>
               <button
                 onClick={clearHistory}
-                className="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded"
+                className="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-2 rounded-lg"
               >
                 Clear
               </button>
@@ -213,18 +186,20 @@ const App: React.FC = () => {
           )}
         </header>
 
-        {/* Messages */}
-        <section className="flex-1 overflow-y-auto p-4 space-y-4 scroll-area">
+        {/* Chat Messages */}
+        <section className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50">
           {currentChatMessages.map((m, i) => (
             <div
               key={i}
-              className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              className={`flex ${
+                m.role === "user" ? "justify-end" : "justify-start"
+              }`}
             >
               <div
-                className={`max-w-xl px-4 py-2 rounded-lg ${
-                  m.role === 'user'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-gray-200 text-gray-900'
+                className={`max-w-xl px-4 py-2 rounded-2xl shadow-md ${
+                  m.role === "user"
+                    ? "bg-indigo-600 text-white rounded-br-none"
+                    : "bg-white text-gray-800 rounded-bl-none"
                 }`}
               >
                 {m.content}
@@ -233,7 +208,7 @@ const App: React.FC = () => {
           ))}
           {loading && (
             <div className="flex justify-start">
-              <div className="px-4 py-2 bg-gray-200 text-gray-900 rounded-lg">
+              <div className="px-4 py-2 bg-white rounded-2xl shadow-md animate-pulse">
                 Thinking...
               </div>
             </div>
@@ -242,21 +217,21 @@ const App: React.FC = () => {
         </section>
 
         {/* Input */}
-        <footer className="bg-white border-t p-4">
-          <div className="flex gap-2">
+        <footer className="bg-white border-t p-4 shadow-inner">
+          <div className="flex gap-3">
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-              placeholder="Ask something..."
+              onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+              placeholder="Ask a question..."
               disabled={!selectedChat || loading}
-              className="flex-1 border rounded-l-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 outline-none"
             />
             <button
               onClick={sendMessage}
               disabled={!selectedChat || loading || !input.trim()}
-              className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-5 rounded-r-md"
+              className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-6 py-2 rounded-lg transition"
             >
               Send
             </button>
@@ -264,34 +239,33 @@ const App: React.FC = () => {
         </footer>
       </main>
 
-      {/* ---------- New-Chat Modal ---------- */}
+      {/* New Chat Modal */}
       {showNewChat && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg w-96">
-            <h2 className="text-lg font-semibold mb-4">New Chat</h2>
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl p-6 shadow-xl w-96">
+            <h2 className="text-lg font-semibold mb-3">Create New Chat</h2>
             <input
-              autoFocus
               type="text"
               value={newChatName}
               onChange={(e) => setNewChatName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && createChat()}
-              placeholder="Chat name"
-              className="w-full border rounded px-3 py-2 mb-4"
+              onKeyDown={(e) => e.key === "Enter" && createChat()}
+              placeholder="Enter chat name"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-4 focus:ring-2 focus:ring-indigo-500 outline-none"
             />
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => {
                   setShowNewChat(false);
-                  setNewChatName('');
+                  setNewChatName("");
                 }}
-                className="px-4 py-1 bg-gray-300 hover:bg-gray-400 rounded"
+                className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300"
               >
                 Cancel
               </button>
               <button
                 onClick={createChat}
                 disabled={!newChatName.trim()}
-                className="px-4 py-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded"
+                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50"
               >
                 Create
               </button>
