@@ -1,219 +1,294 @@
-## Knowledge-base Search Engine (RAG Multi-Chat)
+# RAG Search Engine - Multi-Chat Knowledge Base
 
 ## 🔗 Quick Links
-- **DEMO VIDEO FILE:** [Click Here](https://drive.google.com/file/d/1JDmQmco6dtVL7jBIPAuPlhy4vHDFjbli/view?usp=sharing)  
-- **GITHUB CODE:** [Click Here](https://github.com/karthiksagarN/RAG-SEARCH-ENGINE)
+- **DEMO VIDEO:** [Click Here](https://drive.google.com/file/d/1JDmQmco6dtVL7jBIPAuPlhy4vHDFjbli/view?usp=sharing)  
+- **GITHUB:** [Click Here](https://github.com/karthiksagarN/RAG-SEARCH-ENGINE)
 
-This repository is a small Retrieval-Augmented Generation (RAG) demo that lets you create multiple chat sessions, upload documents per-chat, build persistent vector stores, and ask natural-language questions against those documents using OpenAI.
+A production-ready Retrieval-Augmented Generation (RAG) application that enables users to create multiple chat sessions, upload documents, and query them using natural language powered by OpenAI. Built with modern cloud-native architecture using MongoDB and Pinecone for scalable deployment.
 
-The project is split into two folders:
+## ✨ Features
 
-- `backend/` – FastAPI-based RAG API that handles chat session lifecycle, document ingestion (PDF/TXT), vector store persistence (Chroma), and querying via LangChain + OpenAI.
-- `frontend/` – A small Vite + React frontend that demonstrates the client-side UI and calls the backend REST API.
+- 🔐 **User Authentication** - Secure JWT-based authentication system
+- 💬 **Multi-Chat Sessions** - Create and manage multiple isolated chat contexts
+- 📄 **Document Upload** - Support for PDF and TXT files
+- 🔍 **Intelligent Search** - RAG-powered question answering using OpenAI
+- ☁️ **Cloud-Native** - MongoDB for data persistence, Pinecone for vector storage
+- 🎨 **Modern UI** - Beautiful React frontend with responsive design
+- 🚀 **Production Ready** - Deployable on Render (backend) and Vercel (frontend)
 
-## Quick summary of the flow
-
-1. The frontend creates a chat session by POSTing to `/create_chat`.
-2. The frontend (or user) uploads files (PDF/TXT) to `/upload/{chat_id}`. The backend splits documents into chunks, generates embeddings (OpenAI), and persists them to a Chroma vector store on disk scoped to that chat.
-3. When a user asks a question, the frontend sends the query to `/query/{chat_id}`. The backend loads (and caches) a retrieval chain for the chat, retrieves relevant chunks, and runs an LLM to answer using the retrieved context.
-4. Chats and databases can be listed (`/list_chats`) and deleted (`/delete_chat/{chat_id}`).
-
-## Technologies used
-
-- Backend: FastAPI, Python
-- RAG / embeddings / LLM: LangChain (community helpers), LangChain OpenAI adapters
-- Vector store: Chroma (persistent, file-backed)
-- LLM & embeddings provider: OpenAI (models configured in backend)
-- Frontend: Vite, React, TypeScript
-- HTTP client: axios
-
-## Repo layout
+## 🏗️ Architecture
 
 ```
-./
-├─ backend/
-│  ├─ main.py               # FastAPI app and RAG logic
-│  ├─ uploaded_files/       # Temporary upload staging (cleaned after ingestion)
-│  ├─ chroma_db/            # (example / existing DB files)
-│  └─ .env                  # Put OPENAI_API_KEY here
-├─ frontend/
-│  ├─ src/                  # React app
-│  ├─ package.json
-│  └─ .env.example
-├─ requirements.txt         # Python deps (backend)
-└─ README.md
+┌─────────────────────────────────────────────────────────────────┐
+│                     Frontend (React + Vite)                      │
+│                  Deployed on Vercel                              │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ REST API (HTTPS)
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   Backend (FastAPI + Python)                     │
+│                    Deployed on Render                            │
+└─────┬──────────────────────┬──────────────────────┬─────────────┘
+      │                      │                      │
+      ▼                      ▼                      ▼
+┌──────────┐         ┌──────────────┐      ┌─────────────┐
+│ MongoDB  │         │   Pinecone   │      │   OpenAI    │
+│ (Atlas)  │         │ Vector Store │      │  LLM + Emb  │
+│  Users   │         │  Embeddings  │      │  gpt-4o-mini│
+│  Chats   │         │  Per-Chat NS │      │ text-emb-3  │
+└──────────┘         └──────────────┘      └─────────────┘
 ```
 
-## 🏗️ System Architecture
+## 🛠️ Tech Stack
+
+### Backend
+- **Framework:** FastAPI (Python)
+- **Database:** MongoDB Atlas (user data, chat metadata)
+- **Vector Store:** Pinecone (document embeddings)
+- **LLM Provider:** OpenAI (GPT-4o-mini, text-embedding-3-small)
+- **Auth:** JWT with python-jose
+- **RAG Framework:** LangChain
+
+### Frontend
+- **Framework:** React 18 + Vite
+- **Language:** TypeScript
+- **Styling:** Custom CSS with modern design
+- **HTTP Client:** Axios
+- **Routing:** React Router DOM
+
+## 📁 Project Structure
 
 ```
-                             +-------------------------+
-                             |    Frontend (Vite)      |
-                             |  React + TypeScript UI   |
-                             +-----------+-------------+
-                                         |
-                                         | HTTP (REST)
-                                         v
-                             +-------------------------+
-                             |   Backend (FastAPI)     |
-                             |   `backend/main.py`     |
-                             +-----------+-------------+
-                                         |
-         +-------------------------------+-------------------------------+
-         |                                                               |
-         v                                                               v
-+----------------------+                                       +----------------------+
-| LangChain Retrieval  |<-- uses OpenAI embeddings / LLMs -->|  OpenAI (LLM & Emb)  |
-| + retrieval chains   |                                       |  (text-embedding-*)  |
-+----------------------+                                       +----------------------+
-         |
-         v
-+----------------------+    persistent per-chat DBs    +----------------------+
-|   Vector Store       |<------------------------------>|   all_chat_dbs/      |
-|   (Chroma)           |   (Chroma on-disk, per-chat)   |  (chat_id folders)    |
-+----------------------+                               +----------------------+
-         |
-         v
-+----------------------+
-| Uploaded files stash |  (temporary uploads, cleaned)  
-|  `backend/uploaded_files/` |
-+----------------------+
-
+.
+├── backend/
+│   ├── main.py              # FastAPI app & RAG logic
+│   ├── auth.py              # JWT authentication
+│   ├── database.py          # MongoDB connection
+│   ├── models.py            # Pydantic models
+│   ├── requirements.txt     # Python dependencies
+│   ├── .env.example         # Environment variables template
+│   └── uploaded_files/      # Temporary file storage
+│
+├── frontend/
+│   ├── src/
+│   │   ├── components/      # React components
+│   │   ├── api.ts          # API client
+│   │   ├── App.tsx         # Main app component
+│   │   └── index.css       # Global styles
+│   ├── package.json
+│   └── .env.example
+│
+└── README.md
 ```
 
+## 🚀 Quick Start
 
-## Important paths & runtime data
+### Prerequisites
+- Python 3.11+
+- Node.js 18+
+- MongoDB Atlas account
+- Pinecone account
+- OpenAI API key
 
-- Chat-specific persistent vector stores are created under `all_chat_dbs/` (created by the backend at runtime). If you run the backend from the `backend/` folder, `all_chat_dbs/` will be created there.
-- Uploaded files are temporarily saved to `backend/uploaded_files/` and removed after ingestion.
-- There is an example `backend/chroma_db/` directory checked-in in this project; the app uses `all_chat_dbs/` by default but you may reuse or migrate existing Chroma files if desired.
+### Backend Setup
 
-## Environment variables
-
-- Create a `.env` file in `backend/` with:
-
-```
-OPENAI_API_KEY=sk-...your-key-here...
-```
-
-The backend code reads `OPENAI_API_KEY` from the environment and will raise errors if the key is missing or invalid.
-
-You can also add a `.env` in `frontend/` (or edit `.env.example`) to configure the frontend dev server and backend base URL if the client code expects it. A common variable is `VITE_API_BASE` or simply editing the client code's API base to `http://localhost:8000`.
-
-## Setup and run (recommended)
-
-Prerequisites: Python 3.10+ (or 3.11), Node.js 18+/npm (or pnpm/yarn)
-
-1) Install backend Python dependencies
-
+1. **Clone the repository**
 ```bash
-cd backend
-python -m venv .venv        # optional but recommended
-source .venv/bin/activate
-pip install -r ../requirements.txt
-# If uvicorn isn't in requirements, install it:
-pip install uvicorn
+git clone https://github.com/karthiksagarN/RAG-SEARCH-ENGINE.git
+cd RAG-SEARCH-ENGINE/backend
 ```
 
-2) Run the backend (FastAPI)
-
-Run from the `backend/` folder so relative paths are correct:
-
+2. **Create virtual environment**
 ```bash
-cd backend
-# Expose the app on port 8000 (default)
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+```
+
+3. **Install dependencies**
+```bash
+pip install -r requirements.txt
+```
+
+4. **Configure environment variables**
+
+Create a `.env` file in the `backend/` directory:
+
+```env
+# OpenAI
+OPENAI_API_KEY=sk-your-openai-api-key
+
+# MongoDB
+MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/
+
+# Pinecone
+PINECONE_API_KEY=your-pinecone-api-key
+PINECONE_INDEX_NAME=your-index-name
+
+# JWT
+SECRET_KEY=your-secret-key-for-jwt
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+```
+
+5. **Run the backend**
+```bash
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-The FastAPI interactive docs will be available at: http://localhost:8000/docs
+Backend will be available at: http://localhost:8000  
+API docs: http://localhost:8000/docs
 
-3) Install and run frontend
+### Frontend Setup
 
+1. **Navigate to frontend**
 ```bash
-cd frontend
+cd ../frontend
+```
+
+2. **Install dependencies**
+```bash
 npm install
+```
+
+3. **Configure environment variables**
+
+Create a `.env` file in the `frontend/` directory:
+
+```env
+VITE_API_URL=http://localhost:8000
+```
+
+4. **Run the frontend**
+```bash
 npm run dev
 ```
 
-Vite's dev server will usually be at http://localhost:5173 — open that in your browser to see the UI.
+Frontend will be available at: http://localhost:5173
 
-Run both backend and frontend concurrently during development.
+## 🌐 Deployment
 
-## Example API usage
+### Backend (Render)
 
-Create a chat session (returns a chat_id):
+1. **Create a new Web Service** on Render
+2. **Connect your GitHub repository**
+3. **Configure the service:**
+   - **Build Command:** `pip install -r backend/requirements.txt`
+   - **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT`
+   - **Root Directory:** `backend`
 
-```bash
-curl -X POST "http://localhost:8000/create_chat" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "My Project Docs"}'
+4. **Add environment variables:**
+   - `OPENAI_API_KEY`
+   - `MONGO_URI`
+   - `PINECONE_API_KEY`
+   - `PINECONE_INDEX_NAME`
+   - `SECRET_KEY`
+   - `ALGORITHM`
+   - `ACCESS_TOKEN_EXPIRE_MINUTES`
+
+### Frontend (Vercel)
+
+1. **Import your repository** on Vercel
+2. **Configure the project:**
+   - **Framework Preset:** Vite
+   - **Root Directory:** `frontend`
+   - **Build Command:** `npm run build`
+   - **Output Directory:** `dist`
+
+3. **Add environment variable:**
+   - `VITE_API_URL`: Your Render backend URL (e.g., `https://your-app.onrender.com`)
+
+4. **Update frontend API configuration:**
+
+Edit `frontend/src/api.ts`:
+```typescript
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 ```
 
-Upload documents to a chat (multi-part form; PDF/TXT supported):
+## 📚 API Endpoints
 
-```bash
-curl -X POST "http://localhost:8000/upload/<CHAT_ID>" \
-  -F "files=@/path/to/doc1.pdf" \
-  -F "files=@/path/to/doc2.txt"
-```
+### Authentication
+- `POST /auth/register` - Register new user
+- `POST /auth/login` - Login and get JWT token
+- `GET /auth/me` - Get current user info
 
-Query the chat:
+### Chat Management
+- `POST /create_chat` - Create new chat session
+- `GET /list_chats` - List all user's chats
+- `DELETE /delete_chat/{chat_id}` - Delete a chat
 
-```bash
-curl -X POST "http://localhost:8000/query/<CHAT_ID>" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What is the main idea of the document?"}'
-```
+### Document Operations
+- `POST /upload/{chat_id}` - Upload documents to chat
+- `POST /query/{chat_id}` - Query documents in chat
 
-List chats:
+## 🔧 Configuration
 
-```bash
-curl http://localhost:8000/list_chats
-```
+### Pinecone Setup
+1. Create a Pinecone account at https://www.pinecone.io/
+2. Create a new index with:
+   - **Dimensions:** 1536 (for text-embedding-3-small)
+   - **Metric:** Cosine
+   - **Cloud:** AWS (or your preference)
 
-Delete a chat and its vector store:
+### MongoDB Setup
+1. Create a MongoDB Atlas account
+2. Create a new cluster
+3. Add your IP to the whitelist (or allow all for development)
+4. Create a database user
+5. Get your connection string
 
-```bash
-curl -X DELETE http://localhost:8000/delete_chat/<CHAT_ID>
-```
+## 🎯 Usage Flow
 
-## Common issues & troubleshooting
+1. **Register/Login** - Create an account or login
+2. **Create Chat** - Start a new chat session
+3. **Upload Documents** - Upload PDF or TXT files to the chat
+4. **Ask Questions** - Query your documents using natural language
+5. **Get Answers** - Receive AI-generated responses with source citations
 
-- OpenAI API key errors: If the backend logs errors mentioning "api_key" or returns 500 errors, verify `OPENAI_API_KEY` is set and valid. Make sure you have quota and the right model access.
-- Port conflicts: Ensure no other server is running on ports 8000 or 5173.
-- Large PDFs: Document loaders may fail on extremely large or malformed PDFs; try splitting files or converting to plain text.
-- CORS: The backend currently allows all origins via FastAPI's CORSMiddleware — this is convenient for development but consider restricting it for production.
+## 🐛 Troubleshooting
 
-## Notes and assumptions
+### Backend Issues
+- **MongoDB Connection Error:** Verify `MONGO_URI` is correct and IP is whitelisted
+- **Pinecone Error:** Ensure index exists and API key is valid
+- **OpenAI Error:** Check API key and account quota
 
-- The backend expects to be run from the `backend/` folder so relative paths such as `all_chat_dbs/` and `uploaded_files/` resolve there.
-- The code uses OpenAI for embeddings and responses; if you want to swap providers locally you will need to update the embedding/LLM initialization in `backend/main.py`.
-- The repository includes an example Chroma DB snapshot in `backend/chroma_db/`. The app stores active chat DBs under a separate `all_chat_dbs/` folder at runtime.
+### Frontend Issues
+- **CORS Error:** Ensure backend CORS is configured for your frontend URL
+- **API Connection Failed:** Verify `VITE_API_URL` points to correct backend
 
-## Next steps (suggested improvements)
+### Deployment Issues
+- **Render Port Error:** Ensure start command uses `--host 0.0.0.0 --port $PORT`
+- **Build Failed:** Check Python version (3.11+) and requirements.txt
 
-- Add a docker-compose for easy local startup of both frontend and backend.
-- Add tests for the backend endpoints (pytest) and one end-to-end test to validate the upload -> query flow.
-- Add more robust metadata (timestamp, human-readable created_at) and authentication for multi-user support.
+## 🔒 Security Notes
 
----
+- JWT tokens expire after 30 minutes (configurable)
+- Passwords are hashed using bcrypt
+- All API endpoints (except auth) require authentication
+- Users can only access their own chats
+- Environment variables should never be committed to Git
 
-If you'd like, I can also:
+## 📈 Future Enhancements
 
-- Add a simple `docker-compose.yml` to run both services.
-- Add a tiny integration test to validate the upload + query happy path (using a small text file and a mocked OpenAI response).
-
-If you want one of those next, tell me which and I'll implement it.
-
----
+- [ ] Chat history persistence
+- [ ] File type expansion (DOCX, CSV, etc.)
+- [ ] Multi-language support
+- [ ] Advanced search filters
+- [ ] Chat sharing functionality
+- [ ] Usage analytics dashboard
 
 ## 🧾 Deliverables
 - ✅ **GitHub Repository** (Open access)  
-- ✅ **Demo Video (Optional)**  
-- ✅ **Documentation (this file)**  
-
----
+- ✅ **Demo Video**  
+- ✅ **Complete Documentation**
+- ✅ **Production Deployment**
 
 ## 🧑‍💻 Author
 **N. Karthik Sagar**  
-[GitHub](https://github.com/karthiksagarn) | [LinkedIn](https://linkedin.com/in/karthik-sagar-nallagula)  | [Portfolio](https://nkarthiksagar.vercel.app/)
+[GitHub](https://github.com/karthiksagarn) | [LinkedIn](https://linkedin.com/in/karthik-sagar-nallagula) | [Portfolio](https://karthiknallagula.com/)
+
+## 📄 License
+This project is open source and available under the MIT License.
+
+---
+
+**Built with ❤️ using FastAPI, React, MongoDB, Pinecone, and OpenAI**
