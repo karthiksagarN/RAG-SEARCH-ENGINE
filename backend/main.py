@@ -1,44 +1,58 @@
-
 import os
-import shutil
 import uuid
-import json
-from fastapi import FastAPI, UploadFile, File, HTTPException
+import shutil
+from typing import List, Dict, Optional
+from datetime import datetime
+
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Dict
+from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel, Field
+from pymongo.database import Database
 
 # --- LangChain Imports ---
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
-from langchain_community.vectorstores import Chroma
-from langchain_openai import OpenAIEmbeddings
+from langchain_pinecone import PineconeVectorStore
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.chains.retrieval import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
+from pinecone import Pinecone, ServerlessSpec
+
+# --- Internal Imports ---
+from database import get_db
+from models import User
+from auth import (
+    get_current_user,
+    create_access_token,
+    get_password_hash,
+    verify_password,
+    Token,
+    ACCESS_TOKEN_EXPIRE_MINUTES
+)
+from datetime import timedelta
 
 # --- Environment Setup ---
 from dotenv import load_dotenv
 load_dotenv()
-# This ensures the API key is loaded from your .env file
-os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 
 # --- Constants ---
-# Base directory to store all chat-specific databases
-ROOT_DB_DIR = "all_chat_dbs"
 UPLOAD_DIR = "uploaded_files"
-os.makedirs(ROOT_DB_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# --- Model Selection ---
 OPENAI_EMBED_MODEL = "text-embedding-3-small"
 OPENAI_LLM_MODEL = "gpt-4o-mini"
+PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+
+if not PINECONE_API_KEY or not PINECONE_INDEX_NAME:
+    raise ValueError("PINECONE_API_KEY and PINECONE_INDEX_NAME must be set in environment variables")
 
 # --- App Initialization ---
 app = FastAPI(
-    title="Multi-Chat RAG API (OpenAI)",
-    description="API for a RAG system using OpenAI that supports multiple chat sessions."
+    title="Multi-Chat RAG API (MongoDB + Pinecone)",
+    description="API for a RAG system using OpenAI, MongoDB, and Pinecone."
 )
 
 app.add_middleware(
@@ -50,42 +64,31 @@ app.add_middleware(
 )
 
 # --- Global In-Memory Chain Cache ---
-# Caches active RAG chains to avoid reloading from disk on every query
 chain_cache: Dict[str, any] = {}
 
 # --- Helper Functions ---
 
-def get_chat_db_path(chat_id: str) -> str:
-    """Returns the specific database path for a given chat ID."""
-    return os.path.join(ROOT_DB_DIR, chat_id)
-
-def get_chat_metadata_path(chat_id: str) -> str:
-    """Returns the path to the chat's metadata file."""
-    return os.path.join(ROOT_DB_DIR, chat_id, "metadata.json")
-
 def get_embeddings_model():
-    """Initializes and returns the OpenAI embeddings model."""
     return OpenAIEmbeddings(model=OPENAI_EMBED_MODEL)
 
 def get_llm():
-    """Initializes and returns the OpenAI LLM."""
-    # The API key is automatically read from the environment variable
     return ChatOpenAI(model=OPENAI_LLM_MODEL, temperature=0.1)
 
+def get_vectorstore(namespace: str):
+    embeddings = get_embeddings_model()
+    return PineconeVectorStore(
+        index_name=PINECONE_INDEX_NAME,
+        embedding=embeddings,
+        namespace=namespace
+    )
+
 def initialize_rag_chain(chat_id: str):
-    """Initializes and returns a RAG chain for a specific chat_id."""
     if chat_id in chain_cache:
         return chain_cache[chat_id]
 
-    db_path = get_chat_db_path(chat_id)
-    if not os.path.exists(db_path):
-        raise HTTPException(status_code=404, detail="Chat database not found.")
-
     try:
-        embeddings = get_embeddings_model()
         llm = get_llm()
-
-        vectorstore = Chroma(persist_directory=db_path, embedding_function=embeddings)
+        vectorstore = get_vectorstore(namespace=chat_id)
         retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
         prompt_template = """
@@ -104,16 +107,14 @@ def initialize_rag_chain(chat_id: str):
         question_answer_chain = create_stuff_documents_chain(llm, prompt)
         chain = create_retrieval_chain(retriever, question_answer_chain)
         
-        chain_cache[chat_id] = chain  # Cache the chain
+        chain_cache[chat_id] = chain
         print(f"Initialized and cached chain for chat_id: {chat_id}")
         return chain
     except Exception as e:
         print(f"Error initializing chain for {chat_id}: {e}")
-        # This could be an API key error
         if "api_key" in str(e).lower():
-             raise HTTPException(status_code=500, detail="Error initializing RAG chain: Invalid or missing OpenAI API key.")
+             raise HTTPException(status_code=500, detail="Error initializing RAG chain: Invalid or missing API key.")
         raise HTTPException(status_code=500, detail=f"Error initializing RAG chain: {e}")
-
 
 # --- Pydantic Models ---
 class CreateChatRequest(BaseModel):
@@ -125,59 +126,78 @@ class QueryRequest(BaseModel):
 class ChatMetadata(BaseModel):
     chat_id: str
     name: str
-    created_at: str # Using str for simplicity
+    created_at: str
     doc_count: int = 0
+    user_id: Optional[str] = None
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
 
 # --- API Endpoints ---
 
-@app.post("/create_chat", response_model=ChatMetadata)
-async def create_chat(request: CreateChatRequest):
-    """Creates a new, empty chat session."""
-    chat_id = str(uuid.uuid4())
-    chat_db_path = get_chat_db_path(chat_id)
-    os.makedirs(chat_db_path, exist_ok=True)
+@app.post("/auth/register", status_code=status.HTTP_201_CREATED)
+def register(user: UserCreate, db: Database = Depends(get_db)):
+    if db.users.find_one({"username": user.username}):
+        raise HTTPException(status_code=400, detail="Username already registered")
     
-    metadata = ChatMetadata(
-        chat_id=chat_id,
-        name=request.name,
-        created_at=str(uuid.uuid4()), # Placeholder for creation time
+    hashed_password = get_password_hash(user.password)
+    new_user = {"username": user.username, "hashed_password": hashed_password}
+    db.users.insert_one(new_user)
+    return {"message": "User created successfully"}
+
+@app.post("/auth/login", response_model=Token)
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Database = Depends(get_db)):
+    user_data = db.users.find_one({"username": form_data.username})
+    if not user_data or not verify_password(form_data.password, user_data["hashed_password"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user_data["username"]}, expires_delta=access_token_expires
     )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/auth/me")
+async def read_users_me(current_user: User = Depends(get_current_user)):
+    return {"username": current_user.username, "id": current_user.id}
+
+@app.post("/create_chat", response_model=ChatMetadata)
+async def create_chat(request: CreateChatRequest, current_user: User = Depends(get_current_user), db: Database = Depends(get_db)):
+    chat_id = str(uuid.uuid4())
     
-    # Save metadata
-    with open(get_chat_metadata_path(chat_id), "w") as f:
-        json.dump(metadata.model_dump(), f)
-        
-    return metadata
+    chat_doc = {
+        "chat_id": chat_id,
+        "name": request.name,
+        "created_at": datetime.utcnow().isoformat(),
+        "doc_count": 0,
+        "user_id": current_user.id
+    }
+    
+    db.chats.insert_one(chat_doc)
+    
+    return ChatMetadata(**chat_doc)
 
 @app.get("/list_chats", response_model=List[ChatMetadata])
-async def list_chats():
-    """Lists all available chat sessions."""
+async def list_chats(current_user: User = Depends(get_current_user), db: Database = Depends(get_db)):
+    chats_cursor = db.chats.find({"user_id": current_user.id})
     chats = []
-    if not os.path.exists(ROOT_DB_DIR):
-        return []
-        
-    for chat_id in os.listdir(ROOT_DB_DIR):
-        chat_dir = get_chat_db_path(chat_id)
-        metadata_path = get_chat_metadata_path(chat_id)
-        if os.path.isdir(chat_dir) and os.path.exists(metadata_path):
-            try:
-                with open(metadata_path, "r") as f:
-                    data = json.load(f)
-                    chats.append(ChatMetadata(**data))
-            except Exception as e:
-                print(f"Error reading metadata for {chat_id}: {e}")
+    for chat in chats_cursor:
+        chats.append(ChatMetadata(**chat))
     return chats
 
 @app.post("/upload/{chat_id}")
-async def upload_documents(chat_id: str, files: List[UploadFile] = File(...)):
-    """Handles ingestion of documents *for a specific chat*."""
-    chat_db_path = get_chat_db_path(chat_id)
-    metadata_path = get_chat_metadata_path(chat_id)
-    
-    if not os.path.exists(chat_db_path):
-        raise HTTPException(status_code=4.04, detail="Chat session not found.")
+async def upload_documents(chat_id: str, files: List[UploadFile] = File(...), current_user: User = Depends(get_current_user), db: Database = Depends(get_db)):
+    # Verify chat ownership
+    chat = db.chats.find_one({"chat_id": chat_id, "user_id": current_user.id})
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat session not found.")
 
-    # Invalidate cache for this chat if it exists
+    # Invalidate cache
     if chat_id in chain_cache:
         del chain_cache[chat_id]
 
@@ -196,14 +216,11 @@ async def upload_documents(chat_id: str, files: List[UploadFile] = File(...)):
             elif path.endswith(".txt"):
                 loader = TextLoader(path)
             else:
-                continue # Skip unsupported file types
+                continue
             docs.extend(loader.load())
         except Exception as e:
             print(f"Error loading {path}: {e}")
-            os.remove(path) # Clean up
-            raise HTTPException(status_code=400, detail=f"Error processing file {path}: {e}")
         finally:
-            # Clean up uploaded file
             if os.path.exists(path):
                 os.remove(path)
 
@@ -214,49 +231,33 @@ async def upload_documents(chat_id: str, files: List[UploadFile] = File(...)):
     splits = text_splitter.split_documents(docs)
 
     try:
-        embeddings = get_embeddings_model()
-        # Create or update the persistent vector store *for this chat*
-        vectorstore = Chroma.from_documents(
-            documents=splits, 
-            embedding=embeddings, 
-            persist_directory=chat_db_path
-        )
-        vectorstore.persist()
+        vectorstore = get_vectorstore(namespace=chat_id)
+        vectorstore.add_documents(splits)
     except Exception as e:
         print(f"Error creating vector store: {e}")
-        if "api_key" in str(e).lower():
-             raise HTTPException(status_code=500, detail="Vector store creation failed: Invalid or missing OpenAI API key.")
-        raise HTTPException(status_code=500, detail=f"Error creating vector store: {e}")
+        raise HTTPException(status_code=500, detail=f"Error uploading to Pinecone: {e}")
 
-    
-    # Update metadata
-    doc_count = 0
-    metadata_data = {}
-    if os.path.exists(metadata_path):
-        with open(metadata_path, "r") as f:
-            metadata_data = json.load(f)
-            doc_count = metadata_data.get("doc_count", 0)
-            
-    doc_count += len(docs)
-    metadata_data["doc_count"] = doc_count
-    
-    with open(metadata_path, "w") as f:
-        json.dump(metadata_data, f)
+    # Update doc count
+    new_count = chat.get("doc_count", 0) + len(docs)
+    db.chats.update_one({"chat_id": chat_id}, {"$set": {"doc_count": new_count}})
     
     return {
         "message": f"Successfully uploaded {len(files)} files to chat '{chat_id}'.",
         "documents_loaded": len(docs),
         "chunks_created": len(splits),
-        "total_docs_in_chat": doc_count
+        "total_docs_in_chat": new_count
     }
 
 @app.post("/query/{chat_id}")
-async def handle_query(chat_id: str, request: QueryRequest):
-    """Accepts a user query for a specific chat and returns a synthesized answer."""
+async def handle_query(chat_id: str, request: QueryRequest, current_user: User = Depends(get_current_user), db: Database = Depends(get_db)):
+    # Verify chat ownership
+    chat = db.chats.find_one({"chat_id": chat_id, "user_id": current_user.id})
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat session not found.")
+
     try:
         chain = initialize_rag_chain(chat_id)
     except HTTPException as e:
-        # Pass the HTTPException (e.g., 404, 500) directly to the client
         raise e
     
     if not chain:
@@ -271,20 +272,24 @@ async def handle_query(chat_id: str, request: QueryRequest):
         }
     except Exception as e:
         print(f"Error processing query: {e}")
-        if "api_key" in str(e).lower():
-            raise HTTPException(status_code=500, detail="Query failed: Invalid or missing OpenAI API key.")
         return HTTPException(status_code=500, detail=f"Error processing query: {str(e)}")
 
 @app.delete("/delete_chat/{chat_id}")
-async def delete_chat(chat_id: str):
-    """Deletes a chat session and its associated database."""
-    chat_db_path = get_chat_db_path(chat_id)
+async def delete_chat(chat_id: str, current_user: User = Depends(get_current_user), db: Database = Depends(get_db)):
+    chat = db.chats.find_one({"chat_id": chat_id, "user_id": current_user.id})
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat session not found.")
     
     if chat_id in chain_cache:
         del chain_cache[chat_id]
         
-    if os.path.exists(chat_db_path):
-        shutil.rmtree(chat_db_path)
-        return {"message": f"Successfully deleted chat {chat_id}."}
-    else:
-        raise HTTPException(status_code=404, detail="Chat session not found.")
+    # Delete from Pinecone
+    try:
+        vectorstore = get_vectorstore(namespace=chat_id)
+        vectorstore.delete(delete_all=True)
+    except Exception as e:
+        print(f"Error deleting from Pinecone: {e}")
+        # Continue to delete metadata even if Pinecone fails
+        
+    db.chats.delete_one({"chat_id": chat_id})
+    return {"message": f"Successfully deleted chat {chat_id}."}
