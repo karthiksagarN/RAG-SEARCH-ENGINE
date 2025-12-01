@@ -136,6 +136,10 @@ class UserCreate(BaseModel):
 
 # --- API Endpoints ---
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
 @app.post("/auth/register", status_code=status.HTTP_201_CREATED)
 def register(user: UserCreate, db: Database = Depends(get_db)):
     if db.users.find_one({"username": user.username}):
